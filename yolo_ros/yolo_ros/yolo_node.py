@@ -43,7 +43,7 @@ from yolo_msgs.msg import KeyPoint2D
 from yolo_msgs.msg import KeyPoint2DArray
 from yolo_msgs.msg import Detection
 from yolo_msgs.msg import DetectionArray
-from yolo_msgs.srv import SetClasses
+from yolo_msgs.srv import SetClasses, DetectFromSaved
 
 
 class YoloNode(LifecycleNode):
@@ -150,9 +150,12 @@ class YoloNode(LifecycleNode):
 
         self._enable_srv = self.create_service(SetBool, "enable", self.enable_cb)
 
-        if isinstance(self.yolo, YOLOWorld):
+        if isinstance(self.yolo, YOLOWorld) or isinstance(self.yolo, YOLOE):
             self._set_classes_srv = self.create_service(
                 SetClasses, "set_classes", self.set_classes_cb
+            )
+            self._detect_from_saved = self.create_service(
+                DetectFromSaved, "detect_from_saved", self.detect_from_saved_cb
             )
 
         self._sub = self.create_subscription(
@@ -175,9 +178,11 @@ class YoloNode(LifecycleNode):
         self.destroy_service(self._enable_srv)
         self._enable_srv = None
 
-        if isinstance(self.yolo, YOLOWorld):
+        if isinstance(self.yolo, YOLOWorld) or isinstance(self.yolo, YOLOE):
             self.destroy_service(self._set_classes_srv)
             self._set_classes_srv = None
+            self.destroy_service(self._detect_from_saved)
+            self._detect_from_saved = None
 
         self.destroy_subscription(self._sub)
         self._sub = None
@@ -426,8 +431,93 @@ class YoloNode(LifecycleNode):
                 self.yolo.set_classes(classes)
             elif isinstance(self.yolo, YOLOE):
                 self.yolo.set_classes(classes, self.yolo.get_text_pe(classes))
-                
+
             self.classes = classes
+
+    def detect_from_saved_cb(
+        self,
+        req: DetectFromSaved.Request,
+        res: DetectFromSaved.Response,
+    ) -> DetectFromSaved.Response:
+
+        self.set_classes(req.classes)
+        self.get_logger().info(f"New classes: {self.yolo.names}")
+
+        import glob
+        import os
+        img_files = sorted(glob.glob(os.path.expanduser("~/.ros/home-navigation-data/color/*.jpg")))
+        imgs = []
+        for path in img_files:
+            img = cv2.imread(path)
+            rotated_img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)  #camera is mounted in 90 degrees
+            imgs.append(rotated_img)
+            self.get_logger().info(f"Loaded {path} with shape {rotated_img.shape}")
+
+        results = self.yolo.predict(
+                source=imgs,
+                stream=False,
+                iou=self.iou,
+                imgsz=(1280, 736),
+                half=self.half,
+                max_det=self.max_det,
+                augment=self.augment,
+                agnostic_nms=self.agnostic_nms,
+                retina_masks=self.retina_masks,
+                device=self.device,
+            )
+        results_list = [r.cpu() for r in results]
+
+        
+        largest_conf = 0.0
+        x, y = (-1, -1)
+        for i, result in enumerate(results_list):
+            if result.boxes:
+                for j, box in enumerate(result.boxes):
+                    if box.conf > largest_conf:
+                        largest_conf = box.conf
+                        x, y = (i, j)
+        
+        def create_point2d(x: float, y: float) -> Point2D:
+            p = Point2D()
+            p.x = x
+            p.y = y
+            return p
+
+        detection_msg = Detection()
+        img_id = -1
+        if x != -1:
+            img_id = x
+            
+            detection_msg.class_id = int(results_list[x].boxes[y].cls)
+            detection_msg.class_name = self.yolo.names[int(results_list[x].boxes[y].cls)]
+            detection_msg.score = float(results_list[x].boxes[y].conf)
+
+            h, w = results_list[x].orig_img.shape[:2]  #90 clockwise rotated from orgianal image, so below we will rotate it back
+            box_msg = BoundingBox2D()
+            box = results_list[x].boxes[y].xywh[0]
+            (box_msg.center.position.x, box_msg.center.position.y) = self._rotate_ccw(float(box[0]), float(box[1]), h, w)
+            box_msg.size.x = float(box[3])
+            box_msg.size.y = float(box[2])  #swapping x and y
+            detection_msg.bbox = box_msg
+
+            if results_list[x].masks:
+                mask_msg = Mask()
+                mask = results_list[x].masks[y]
+                mask_msg.data = [
+                    create_point2d(*self._rotate_ccw(float(ele[0]), float(ele[1]), h, w))
+                    for ele in mask.xy[0].tolist()
+                ]
+                mask_msg.height = w
+                mask_msg.width = h
+                detection_msg.mask = mask_msg
+        res.detection = detection_msg
+        res.img_id = img_id
+        self.get_logger().info(f"Detection: {detection_msg.class_name} with score {detection_msg.score} in image {img_id}")
+        return res
+    
+    def _rotate_ccw(self, x, y, h, w):
+        return (h - y, x)
+
 
 
 def main():
