@@ -406,6 +406,29 @@ class YoloNode(LifecycleNode):
         self.get_logger().info(f"New classes: {self.yolo.names}")
         return res
 
+    def set_classes(self, classes: List[str]):
+
+        if not getattr(self, "classes", None):
+
+            if isinstance(self.yolo, YOLOWorld):
+                self.yolo.set_classes(classes)
+            elif isinstance(self.yolo, YOLOE):
+                self.yolo.set_classes(classes, self.yolo.get_text_pe(classes))
+
+            self.classes = classes
+
+        elif set(self.classes) != set(classes):
+
+            self.yolo = self.type_to_model[self.model_type](self.model)
+            self.yolo.to(self.device)
+
+            if isinstance(self.yolo, YOLOWorld):
+                self.yolo.set_classes(classes)
+            elif isinstance(self.yolo, YOLOE):
+                self.yolo.set_classes(classes, self.yolo.get_text_pe(classes))
+                
+            self.classes = classes
+
 
 def main():
     rclpy.init()
