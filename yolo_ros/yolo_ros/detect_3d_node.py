@@ -33,7 +33,7 @@ from tf2_ros.buffer import Buffer
 from tf2_ros import TransformException
 from tf2_ros.transform_listener import TransformListener
 
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, Image, CompressedImage
 from geometry_msgs.msg import TransformStamped
 from yolo_msgs.msg import Detection
 from yolo_msgs.msg import DetectionArray
@@ -116,7 +116,7 @@ class Detect3DNode(LifecycleNode):
 
         # subs
         self.depth_sub = message_filters.Subscriber(
-            self, Image, "depth_image", qos_profile=self.depth_image_qos_profile
+            self, CompressedImage, "depth_image", qos_profile=self.depth_image_qos_profile
         )
         self.depth_info_sub = message_filters.Subscriber(
             self, CameraInfo, "depth_info", qos_profile=self.depth_info_qos_profile
@@ -167,7 +167,7 @@ class Detect3DNode(LifecycleNode):
 
     def on_detections(
         self,
-        depth_msg: Image,
+        depth_msg: CompressedImage,
         depth_info_msg: CameraInfo,
         detections_msg: DetectionArray,
     ) -> None:
@@ -181,7 +181,7 @@ class Detect3DNode(LifecycleNode):
 
     def process_detections(
         self,
-        depth_msg: Image,
+        depth_msg: CompressedImage,
         depth_info_msg: CameraInfo,
         detections_msg: DetectionArray,
     ) -> List[Detection]:
@@ -196,9 +196,12 @@ class Detect3DNode(LifecycleNode):
             return []
 
         new_detections = []
-        depth_image = self.cv_bridge.imgmsg_to_cv2(
-            depth_msg, desired_encoding="passthrough"
-        )
+        # depth_image = self.cv_bridge.imgmsg_to_cv2(
+        #     depth_msg, desired_encoding="passthrough"
+        # )
+        # TODO encapsulate
+        np_arr = np.frombuffer(depth_msg.data[12:], np.uint8)
+        depth_image = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)
 
         for detection in detections_msg.detections:
             bbox3d = self.convert_bb_to_3d(depth_image, depth_info_msg, detection)

@@ -35,7 +35,7 @@ from ultralytics.engine.results import Masks
 from ultralytics.engine.results import Keypoints
 
 from std_srvs.srv import SetBool
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from yolo_msgs.msg import Point2D
 from yolo_msgs.msg import BoundingBox2D
 from yolo_msgs.msg import Mask
@@ -132,6 +132,10 @@ class YoloNode(LifecycleNode):
 
         try:
             self.yolo = self.type_to_model[self.model_type](self.model)
+            self.yolo.to(self.device)
+            self.get_logger().info(
+                f"Model loaded on: {next(self.yolo.model.parameters()).device}"
+            )
         except FileNotFoundError:
             self.get_logger().error(f"Model file '{self.model}' does not exists")
             return TransitionCallbackReturn.ERROR
@@ -152,7 +156,7 @@ class YoloNode(LifecycleNode):
             )
 
         self._sub = self.create_subscription(
-            Image, "image_raw", self.image_cb, self.image_qos_profile
+            CompressedImage, "image_raw", self.image_cb, self.image_qos_profile
         )
 
         super().on_activate(state)
@@ -326,12 +330,15 @@ class YoloNode(LifecycleNode):
 
         return keypoints_list
 
-    def image_cb(self, msg: Image) -> None:
+    def image_cb(self, msg: CompressedImage) -> None:
 
         if self.enable:
 
             # convert image + predict
-            cv_image = self.cv_bridge.imgmsg_to_cv2(
+            # cv_image = self.cv_bridge.imgmsg_to_cv2(
+            #     msg, desired_encoding=self.yolo_encoding
+            # )
+            cv_image = self.cv_bridge.compressed_imgmsg_to_cv2(
                 msg, desired_encoding=self.yolo_encoding
             )
             results = self.yolo.predict(

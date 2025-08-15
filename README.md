@@ -36,6 +36,21 @@ cd ~/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
 colcon build
 ```
+```shell
+# in venv
+cd ~/ros2_ws/src
+git clone https://github.com/mgonzs13/yolo_ros.git
+cd ~/ros_ws
+python3 -m venv venvs/yolo_ros --system-site-packages
+. venvs/yolo_ros/bin/activate
+python3 -m pip install -r src/yolo_ros/requirements.txt
+rosdep install --from-paths src --ignore-src -r -y
+python3 -m colcon build \
+  --symlink-install \
+  --event-handlers console_cohesion+ \
+  --base-paths src \
+  --packages-select yolo_bringup yolo_msgs yolo_ros
+```
 
 ## Docker
 
