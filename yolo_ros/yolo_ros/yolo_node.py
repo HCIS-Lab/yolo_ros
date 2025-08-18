@@ -407,7 +407,7 @@ class YoloNode(LifecycleNode):
         res: SetClasses.Response,
     ) -> SetClasses.Response:
         self.get_logger().info(f"Setting classes: {req.classes}")
-        self.yolo.set_classes(req.classes)
+        self.set_classes(req.classes)
         self.get_logger().info(f"New classes: {self.yolo.names}")
         return res
 
